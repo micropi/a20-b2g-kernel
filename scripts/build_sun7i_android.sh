@@ -19,6 +19,25 @@ if [ ${cpu_cores} -le 8 ] ; then
 else
     jobs=`expr ${cpu_cores} / 2`
 fi
+# prepare toolchain for building kernel
+export LICHEE_KERN_DEFCONF=sun7ismp_android_defconfig
+function prepare_toolchain()
+{
+	local tooldir="${ANDROID_BUILD_TOP}/external-toolchain"
+	mkdir -p ${tooldir}
+	if [ -f ${tooldir}/.installed ] ; then
+		printf "external toolchain has been installed\n"
+	else
+		printf "installing external toolchain\n"
+		printf "please wait for a few minutes ...\n"
+		tar --strip-components=1 \
+		    -jxf ${ANDROID_BUILD_TOP}/linaro_toolchain/gcc-linaro.tar.bz2 \
+		    -C ${tooldir}
+		[ $? -eq 0 ] && touch ${tooldir}/.installed
+	fi
+	
+	export PATH=${tooldir}/bin:${PATH}
+}
 
 # Setup common variables
 export ARCH=arm
@@ -166,9 +185,32 @@ build_modules()
 
 gen_output()
 {
-    echo "Copy output to target ..."
-    rm -rf ${LICHEE_PLAT_OUT}/lib
-    cp -rf ${LICHEE_KDIR}/output/* ${LICHEE_PLAT_OUT}
+	CURDIR=`pwd`
+	echo "Copy output to target ..."
+	cd ${DEVICE_PATH}
+	if [ -f kernel ] ; then
+		rm kernel
+	fi
+	cp ${LICHEE_KDIR}/output/bImage kernel 
+	echo "$DEVICE/bImage copied!"
+
+	if [ -d modules ] ; then
+		rm -rf modules
+	fi
+	mkdir -p modules/modules
+	cp -rf ${LICHEE_MOD_DIR}/* modules/modules
+	echo "$DEVICE/modules copied!"
+	chmod 0755 modules/modules/*
+	
+# create modules.mk
+(cat << EOF) > ./modules/modules.mk 
+# modules.mk generate by extract-files.sh , do not edit it !!!!
+PRODUCT_COPY_FILES += \\
+	\$(call find-copy-subdir-files,*,\$(LOCAL_PATH)/modules,system/vendor/modules)
+
+EOF
+
+	cd $CURDIR
 }
 
 clean_kernel()
@@ -213,6 +255,8 @@ clean_modules()
     #    LICHEE_MOD_DIR=${LICHEE_MOD_DIR} LINUXDIR=${LICHEE_KDIR} \
     #    INSTALL_DIR=${LICHEE_MOD_DIR} OEM_ANDROID=1 clean
 }
+
+prepare_toolchain
 
 case "$1" in
     kernel)
